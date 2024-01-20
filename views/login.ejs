@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Webauthn Demo - Login</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Poppins" />
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <style>
+      * { margin:0; padding:0; }
+
+      body {
+        background-color: #1b252f;
+        font-family: 'Poppins', sans-serif;
+        color: #fff;
+        height: 100%;
+        width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <form method="POST">
+        <div>
+        <% if(session.loggedIn) { %>
+            <p>Hello, <strong><%= session.username %></strong>.</p>
+            <button type="submit" formaction="/logout">Logout</button>
+            <pre><%= JSON.stringify(users[session.username], null, 2) %></pre>
+          </div>
+        <% } else { %>
+          <input type="text" name="username" placeholder="Username" />
+          <button type="submit" formaction="/register">Register</button>
+          <button type="submit" formaction="/login">Login</button>
+          <button type="submit" formaction="/response" hidden>Sign request…</button>
+          <span class="hint"></span>
+        <% } %>
+        </div>
+      </form>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/herrjemand/Base64URL-ArrayBuffer@latest/lib/base64url-arraybuffer.js"></script>
+    <script>
+      const form = document.querySelector('form');
+      const input = form.querySelector('input[name=username]')
+      const registerButton = form.querySelector('button[formaction$=register]')
+      const loginButton = form.querySelector('button[formaction$=login]')
+      const responseButton = form.querySelector('button[formaction$=response]')
+      const hint = form.querySelector('.hint')
+
+      const isSafari = ua => !!ua && ua.includes('Safari/') && !(ua.includes('Chrome/') || ua.includes('Chromium/'));
+
+      function showResponse() {
+        input.disabled = true;
+        registerButton.hidden = true;
+        loginButton.hidden = true;
+        responseButton.hidden = false;
+        // TODO: Safari requires an event to auto open so would have to pre-fetch challenge before button click
+        if (isSafari(navigator.userAgent)) 
+          requestAnimationFrame(() => responseButton.focus());
+        else 
+          requestAnimationFrame(() => responseButton.click());
+      }
+
+      async function register() {
+        hint.textContent = ''
+        registerButton.textContent = 'Loading…';
+        const res = await fetch('/webauthn/register', {
+          method: 'POST',
+          body: JSON.stringify({ username: input.value }),
+          headers: {
+            "Content-Type": "application/json"
+          }
+        });
+        if (res.ok) {
+          const publicKey = await res.json();
+          showResponse();
+          return publicKey
+        } else {
+          registerButton.textContent = 'Register';
+          hint.textContent = res.status + ' ' + res.statusText
+        }
+      }
+
+      async function login() {
+        hint.textContent = '';
+        loginButton.textContent = 'Loading…';
+        const res = await fetch('/webauthn/login', {
+          method: 'POST',
+          body: JSON.stringify({ username: input.value }),
+          headers: {
+            "Content-Type": "application/json"
+          }
+        });
+        if (res.ok) {
+          const publicKey = await res.json();
+          showResponse();
+          return publicKey;
+        } else  {
+          loginButton.textContent = 'Login';
+          hint.textContent = res.status + ' ' + res.statusText
+        }
+      }
+
+      async function handleResponse(publicKey) {
+        if (publicKey) {
+          hint.textContent = '';
+          const challenge = publicKey.challenge;
+          publicKey = {
+            ...publicKey,
+            challenge: publicKey.challenge != undefined ? base64url.decode(publicKey.challenge) : undefined,
+            user: {
+              ...publicKey.user,
+              id: publicKey.user != undefined ? base64url.decode(publicKey.user.id) : undefined,
+            },
+            allowCredentials: publicKey.allowCredentials != undefined ? publicKey.allowCredentials.map(i => ({type: "public-key",id: base64url.decode(i.id)})) : undefined
+          };
+          const cred = 'attestation' in publicKey ? await navigator.credentials.create({ publicKey }) : await navigator.credentials.get({ publicKey });
+          responseButton.disabled = true;
+          const credential = {};
+          credential.id =     cred.id;
+          credential.rawId =  base64url.encode(cred.rawId);
+          credential.type =   cred.type;
+          credential.challenge = challenge;
+
+          if (cred.response) {
+            credential.response = {};
+            for (let item in cred.response) credential.response[item] = base64url.encode(cred.response[item]);
+          }
+          console.log(cred);
+          const res = await fetch('/webauthn/response', {
+            method: 'POST',
+            body: JSON.stringify(credential),
+            headers: {
+              "Content-Type": "application/json"
+            }
+          });
+          if (res.ok) { 
+            setTimeout(() => location.reload(), 250);
+          } else {
+            hint.textContent = res.status + ' ' + res.statusText;
+          }
+        }
+      }
+
+      async function logout() {
+        const res = await fetch('/webauthn/logout', { method: 'POST' });
+        if (res.ok) setTimeout(() => location.reload(), 250);
+      }
+
+      let publicKey;
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const { formAction } = event.submitter;
+        if (formAction.endsWith('/register')) {
+          publicKey = await register();
+        }
+        if (formAction.endsWith('/login')) {
+          publicKey = await login();
+        }
+        if (formAction.endsWith('/response')) {
+          await handleResponse(publicKey);
+        }
+        if (formAction.endsWith('/logout')) {
+          await logout();
+        }
+      });
+    </script>
+  </body>
+</html>
