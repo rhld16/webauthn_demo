@@ -1,7 +1,6 @@
 require('dotenv').config();
 const fs = require('fs');
 const http = require('http');
-const WebSocket = require('ws');
 const express = require('express');
 const crypto = require('crypto');
 const { Fido2Lib, coerceToArrayBuffer, coerceToBase64Url } = require("fido2-lib");
@@ -17,7 +16,6 @@ const server = http.createServer(app);
 
 const usersPath = __dirname + '/users.json';
 const nanoid=(t=21)=>crypto.getRandomValues(new Uint8Array(t)).reduce(((t,e)=>t+=(e&=63)<36?e.toString(36):e<62?(e-26).toString(36).toUpperCase():e>62?"-":"_"),"");
-console.log
 const fido2 = new Fido2Lib({
   rpId: process.env.RP_ID,
   rpName: process.env.RP_NAME,
